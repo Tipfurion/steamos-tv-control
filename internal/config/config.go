@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,6 +25,7 @@ type Config struct {
 	Name          string `json:"name"`
 	HDMI          int    `json:"hdmi"`
 	InputMode     string `json:"input_mode"`
+	InputURI      string `json:"input_uri,omitempty"`
 	Sequence      []Step `json:"sequence,omitempty"`
 	InputVerified bool   `json:"input_verified"`
 	PowerMode     string `json:"power_mode"`
@@ -99,8 +101,11 @@ func (c Config) Validate() error {
 	if c.WakeSeconds < 1 || c.WakeSeconds > 300 {
 		return errors.New("wake_seconds must be between 1 and 300")
 	}
-	if c.InputMode != "direct" && c.InputMode != "sequence" {
-		return errors.New("input_mode: direct or sequence")
+	if c.InputMode != "direct" && c.InputMode != "sequence" && c.InputMode != "app-link" {
+		return errors.New("input_mode: direct, app-link or sequence")
+	}
+	if c.InputMode == "app-link" && !ValidInputURI(c.InputURI) {
+		return errors.New("input_uri must be an Android TV passthrough content URI")
 	}
 	if c.InputMode == "sequence" && len(c.Sequence) == 0 {
 		return errors.New("empty HDMI sequence")
@@ -133,6 +138,15 @@ func (c Config) Validate() error {
 	}
 	return nil
 }
+
+func ValidInputURI(value string) bool {
+	u, err := url.Parse(value)
+	return err == nil && len(value) <= 2048 && !strings.ContainsAny(value, " \t\r\n") &&
+		u.Scheme == "content" && u.Host == "android.media.tv" && u.User == nil &&
+		u.RawQuery == "" && u.Fragment == "" &&
+		strings.HasPrefix(u.Path, "/passthrough/") && len(strings.TrimPrefix(u.Path, "/passthrough/")) > 0
+}
+
 func ValidInputKey(s string) bool {
 	s = strings.TrimPrefix(s, "KEYCODE_")
 	switch s {

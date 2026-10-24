@@ -20,7 +20,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y dbus shellcheck
       - run: go test -race ./...
       - run: go vet ./...
-      - run: shellcheck install.sh scripts/*.sh
+      - run: shellcheck install.sh scripts/*.sh internal/service/network-pre-down.sh
       - run: bash scripts/test-docker.sh
       - run: make release VERSION="$GITHUB_REF_NAME"
       - run: python3 scripts/test-release-package.py

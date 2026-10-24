@@ -154,8 +154,10 @@ func Configure(ctx context.Context, p config.Paths, in io.Reader, out io.Writer,
 	if err != nil {
 		return fmt.Errorf("paired, but could not reconnect: %w", err)
 	}
+	isTCL := false
 	if info := r.Info(); info != nil {
-		if strings.Contains(strings.ToLower(info.Manufacturer+" "+info.Model), "tcl") {
+		isTCL = strings.Contains(strings.ToLower(info.Manufacturer+" "+info.Model), "tcl")
+		if isTCL {
 			c.PowerMode = "guarded-power"
 		}
 		slog.Info("TV identified", "manufacturer", info.Manufacturer, "model", info.Model, "power_mode", c.PowerMode)
@@ -176,20 +178,37 @@ func Configure(ctx context.Context, p config.Paths, in io.Reader, out io.Writer,
 			return fmt.Errorf("HDMI must be between 1 and 4")
 		}
 		c.HDMI = n
-		ctl := control.New(c, r)
-		ctl.ToggleFile = filepath.Join(p.State, "pending-power.json")
-		call, cancel = context.WithTimeout(ctx, 10*time.Second)
-		err = ctl.Execute(call, "input", n)
-		cancel()
-		if err != nil {
-			fmt.Fprintln(out, "The input command did not work. TV power will still work; input switching can be adjusted later.")
-			slog.Warn("Initial HDMI command failed", "hdmi", n, "error", err)
-		} else {
+		tryInput := func() (bool, error) {
+			ctl := control.New(c, r)
+			call, cancel := context.WithTimeout(ctx, 10*time.Second)
+			err := ctl.Execute(call, "input", n)
+			cancel()
+			if err != nil {
+				if ctx.Err() != nil {
+					return false, ctx.Err()
+				}
+				fmt.Fprintln(out, "The input command could not be sent.")
+				slog.Warn("Initial HDMI command failed", "hdmi", n, "input_mode", c.InputMode, "error", err)
+				return false, nil
+			}
 			answer, e := ask("Is the PC picture visible on the TV? [y/N]: ")
 			if e != nil {
-				return e
+				return false, e
 			}
-			c.InputVerified = strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes")
+			return strings.EqualFold(answer, "y") || strings.EqualFold(answer, "yes"), nil
+		}
+		if c.InputVerified, err = tryInput(); err != nil {
+			return err
+		}
+		if !c.InputVerified && isTCL {
+			fmt.Fprintf(out, "Trying another way to select HDMI %d…\n", n)
+			// This is a candidate for modern TCL firmware. Input IDs vary
+			// between models, so automation still needs visual confirmation.
+			c.InputMode = "app-link"
+			c.InputURI = "content://android.media.tv/passthrough/com.tcl.tvinput%2F.TvPassThroughService%2FHW" + strconv.Itoa(14+n)
+			if c.InputVerified, err = tryInput(); err != nil {
+				return err
+			}
 		}
 	}
 	if err = config.Save(p, c); err != nil {

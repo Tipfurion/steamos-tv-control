@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /tmp/steamos-tv-control ./
 RUN go build -o /usr/local/bin/steamos-tv-control-native ./cmd/steamos-tv-control
 COPY install.sh ./
 COPY scripts ./scripts
-RUN shellcheck install.sh scripts/*.sh
+RUN shellcheck install.sh scripts/*.sh internal/service/network-pre-down.sh
 RUN useradd -m -u 1000 tester
 USER tester
 ENV HOME=/home/tester

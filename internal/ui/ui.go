@@ -129,7 +129,7 @@ func (m *model) command(action string) tea.Cmd {
 			ctl := control.New(c, r)
 			ctl.ToggleFile = filepath.Join(p.State, "pending-power.json")
 			if action == "off" {
-				off, end := context.WithTimeout(call, 2*time.Second)
+				off, end := context.WithTimeout(call, control.ManualOffTimeout)
 				defer end()
 				err = ctl.Execute(off, action, c.HDMI)
 			} else {
@@ -255,6 +255,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.field("mac", m.c.MAC)
 			case "m":
 				m.field("sequence", FormatSequence(m.c.Sequence))
+			case "l":
+				m.field("input-link", m.c.InputURI)
 			case "d":
 				m.c.InputMode = "direct"
 				m.c.InputVerified = false
@@ -337,6 +339,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.message = "Enter an HDMI port between 1 and 4"
 					return m, nil
 				}
+				if m.c.HDMI != n && m.c.InputMode == "app-link" {
+					m.c.InputMode = "direct"
+					m.c.InputURI = ""
+				}
 				m.c.HDMI = n
 				m.c.InputVerified = false
 				if m.wizard {
@@ -364,6 +370,16 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "broadcast":
 				m.c.Broadcast = value
 				m.wizard = false
+				m.busy = true
+				return m, m.save()
+			case "input-link":
+				if !config.ValidInputURI(value) {
+					m.message = "Enter an Android TV passthrough content URI"
+					return m, nil
+				}
+				m.c.InputURI = value
+				m.c.InputMode = "app-link"
+				m.c.InputVerified = false
 				m.busy = true
 				return m, m.save()
 			case "sequence":
@@ -396,10 +412,11 @@ func (m *model) View() tea.View {
 	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#78DCE8")).Render("SteamOS TV Control")
 	var body string
 	if m.screen == "menu" {
-		body = fmt.Sprintf("TV: %s   HDMI %d (%s, verified: %t)\nPower: %s (%s)   Result: %s\nAutomatic wake: %t   Automatic standby: %t\n\n1 Wake   2 Standby   3 Select HDMI   r Refresh\nh HDMI   m Input sequence   d Direct input   v Confirm HDMI\nw Wake-on-LAN   p Power profile   o Auto standby   a Auto wake\ne Pair   s Install service (Linux)   q Quit", m.c.Host, m.c.HDMI, m.c.InputMode, m.c.InputVerified, m.status.Power, m.c.PowerMode, m.status.Result, m.c.AutoOn, m.c.AutoOff)
+		body = fmt.Sprintf("TV: %s   HDMI %d (%s, verified: %t)\nPower: %s (%s)   Result: %s\nAutomatic wake: %t   Automatic standby: %t\n\n1 Wake   2 Standby   3 Select HDMI   r Refresh\nh HDMI   m Input sequence   l Input link   d Direct input   v Confirm HDMI\nw Wake-on-LAN   p Power profile   o Auto standby   a Auto wake\ne Pair   s Install service (Linux)   q Quit", m.c.Host, m.c.HDMI, m.c.InputMode, m.c.InputVerified, m.status.Power, m.c.PowerMode, m.status.Result, m.c.AutoOn, m.c.AutoOff)
 	} else {
 		labels := map[string]string{"host": "TV IP address or hostname (Ctrl+F to discover, then enter a device number)", "pin": "Pairing code shown on the TV", "paired": "Pairing saved. Press Enter to choose a power profile", "hdmi": "PC HDMI port: 1-4", "mac": "TV network interface MAC (leave empty to disable Wake-on-LAN)", "broadcast": "Broadcast address and port, for example 192.168.1.255:9", "sequence": "Steps: TV_INPUT@700,DPAD_LEFT@200,DPAD_CENTER@500", "verify": "Test HDMI with 3 from Home and another input.\nIf both tests select the PC input, type yes"}
 		labels["power"] = "Mode: discrete (WAKEUP/SLEEP) or guarded-power (for TCL)\nPOWER is sent once based on the current state; unconfirmed repeats are blocked.\nOn TCL, enable higher energy use / Screenless service for remote wake."
+		labels["input-link"] = "Android TV input link for the configured HDMI port\nExample: content://android.media.tv/passthrough/com.tcl.tvinput%2F.TvPassThroughService%2FHW16"
 		body = labels[m.screen] + "\n\n" + m.input.View()
 		if m.screen == "host" {
 			for i, d := range m.devices {

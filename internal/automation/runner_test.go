@@ -15,6 +15,8 @@ type executor struct {
 	canceled chan struct{}
 }
 
+func (e executor) ResetConnection() { e.calls <- "reset" }
+
 func (e executor) Execute(ctx context.Context, action string, _ int) error {
 	e.calls <- action
 	if action == "on" {
@@ -70,5 +72,24 @@ func TestBootClaimSurvivesRestart(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(p.State, "last-boot"))
 	if string(b) != "boot-b\n" {
 		t.Fatal(string(b))
+	}
+}
+
+func TestResumeDiscardsOldConnectionBeforeWake(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	e := executor{make(chan string, 4), make(chan struct{})}
+	events := make(chan Event, 1)
+	events <- Event{Kind: "resume"}
+	go Run(ctx, events, config.Default(), e)
+	for _, want := range []string{"reset", "on"} {
+		select {
+		case got := <-e.calls:
+			if got != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
 	}
 }

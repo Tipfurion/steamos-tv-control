@@ -41,3 +41,17 @@ func TestPairingResultRetainsIdentityBeforeNextScreen(t *testing.T) {
 		t.Fatal(m.screen)
 	}
 }
+
+func TestChangingHDMIDoesNotReuseAnotherPortsLink(t *testing.T) {
+	c := config.Default()
+	c.HDMI = 2
+	c.InputMode = "app-link"
+	c.InputURI = "content://android.media.tv/passthrough/com.tcl.tvinput%2F.TvPassThroughService%2FHW16"
+	c.InputVerified = true
+	m := &model{ctx: context.Background(), c: c, screen: "hdmi", input: textinput.New()}
+	m.input.SetValue("3")
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.c.HDMI != 3 || m.c.InputMode != "direct" || m.c.InputURI != "" || m.c.InputVerified {
+		t.Fatal("HDMI 2 link was retained for HDMI 3", m.c)
+	}
+}

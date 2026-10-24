@@ -17,12 +17,17 @@ import (
 type fakeRemote struct {
 	pin       string
 	keys      []string
+	links     []string
 	pairError error
 }
 
 func (f *fakeRemote) Connect(context.Context) error { return nil }
 func (f *fakeRemote) Send(_ context.Context, key string) error {
 	f.keys = append(f.keys, key)
+	return nil
+}
+func (f *fakeRemote) Launch(_ context.Context, uri string) error {
+	f.links = append(f.links, uri)
 	return nil
 }
 func (f *fakeRemote) Power() string { return "on" }
@@ -97,5 +102,27 @@ func TestFailedPairingDoesNotSaveConfiguration(t *testing.T) {
 	entries, _ := os.ReadDir(p.Data)
 	if len(entries) != 0 {
 		t.Fatal("unused identity retained")
+	}
+}
+
+func TestTCLInputLinkRequiresVisualConfirmation(t *testing.T) {
+	for _, answer := range []string{"y", "n"} {
+		t.Run(answer, func(t *testing.T) {
+			p := paths(t)
+			f := &fakeRemote{}
+			var out bytes.Buffer
+			input := "a1b2c3\n2\nn\n" + answer + "\n"
+			if err := Configure(context.Background(), p, strings.NewReader(input), &out, options(f, atv.DiscoveredDevice{IP: "192.0.2.1"})); err != nil {
+				t.Fatal(err)
+			}
+			c, err := config.Load(p)
+			const uri = "content://android.media.tv/passthrough/com.tcl.tvinput%2F.TvPassThroughService%2FHW16"
+			if err != nil || c.InputMode != "app-link" || c.InputURI != uri || c.InputVerified != (answer == "y") {
+				t.Fatal(c, err)
+			}
+			if !reflect.DeepEqual(f.keys, []string{"TV_INPUT_HDMI_2"}) || !reflect.DeepEqual(f.links, []string{uri}) {
+				t.Fatal(f.keys, f.links)
+			}
+		})
 	}
 }

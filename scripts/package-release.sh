@@ -19,7 +19,14 @@ if command -v sha256sum >/dev/null; then
 else
     (cd dist; shasum -a 256 install.sh steamos-tv-control_linux_amd64.tar.gz > SHA256SUMS)
 fi
-cat > dist/release-notes.md <<NOTES
+notes="docs/releases/$version.md"
+if [ -f "$notes" ]; then
+    cat "$notes" > dist/release-notes.md
+    printf '\n\n' >> dist/release-notes.md
+else
+    : > dist/release-notes.md
+fi
+cat >> dist/release-notes.md <<NOTES
 ## Install $version
 
 Switch SteamOS to Desktop Mode, open Konsole, and run:

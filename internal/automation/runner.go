@@ -20,6 +20,7 @@ type Event struct {
 }
 type Executor interface {
 	Execute(context.Context, string, int) error
+	ResetConnection()
 }
 
 // Run serializes lifecycle intents. A new intent cancels the previous one;
@@ -45,7 +46,12 @@ func Run(ctx context.Context, events <-chan Event, c config.Config, exec Executo
 			action := ""
 			timeout := time.Duration(c.WakeSeconds) * time.Second
 			switch e.Kind {
-			case "boot", "resume":
+			case "resume":
+				exec.ResetConnection()
+				if c.AutoOn {
+					action = "on"
+				}
+			case "boot":
 				if c.AutoOn {
 					action = "on"
 				}

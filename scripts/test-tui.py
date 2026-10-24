@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise a real Bubble Tea session, including terminal input and cancellation."""
 import os
+import errno
 import fcntl
 import pty
 import select
@@ -30,7 +31,11 @@ with tempfile.TemporaryDirectory(prefix="tv-tui-") as work:
             if readable:
                 try:
                     chunk = os.read(master, 65536)
-                except OSError:
+                except OSError as error:
+                    if error.errno != errno.EIO:
+                        raise
+                    break
+                if not chunk:
                     break
                 output += chunk
                 if b"\x1b[c" in chunk:
@@ -45,13 +50,17 @@ with tempfile.TemporaryDirectory(prefix="tv-tui-") as work:
             ended, status = os.waitpid(pid, os.WNOHANG)
             if ended:
                 reaped = True
-                assert os.waitstatus_to_exitcode(status) == 0, output.decode(errors="replace")
                 break
-        if not reaped:
+        # PTY EOF/EIO can precede waitpid reporting the child's exit. Keep
+        # the original deadline while allowing that final transition.
+        while not reaped and time.monotonic() < deadline:
             ended, status = os.waitpid(pid, os.WNOHANG)
             reaped = bool(ended)
+            if not reaped:
+                time.sleep(0.01)
         assert escaped and quit_sent, output.decode(errors="replace")
-        assert reaped, "TUI did not exit"
+        assert reaped, "TUI did not exit: " + output.decode(errors="replace")
+        assert os.waitstatus_to_exitcode(status) == 0, output.decode(errors="replace")
         assert not (Path(work) / "steamos-tv-control/config.json").exists()
         print("PASS: real TUI in PTY, setup, Escape, menu, quit, no partial config")
     finally:

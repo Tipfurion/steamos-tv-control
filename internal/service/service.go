@@ -55,6 +55,11 @@ func Install(p config.Paths) error {
 	if _, err = os.Stat(binary); err != nil {
 		return fmt.Errorf("install binary at %s first: %w", binary, err)
 	}
+	if c.AutoOff {
+		if err = installNetworkHook(p); err != nil {
+			return err
+		}
+	}
 	unitPath, err := UnitPath()
 	if err != nil {
 		return err
@@ -90,6 +95,9 @@ func Restart() error {
 func Remove() error {
 	if err := supported(); err != nil {
 		return err
+	}
+	if err := removeNetworkHook(); err != nil {
+		return fmt.Errorf("remove network sleep integration: %w", err)
 	}
 	path, err := UnitPath()
 	if err != nil {

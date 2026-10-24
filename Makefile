@@ -7,7 +7,7 @@ test:
 lint:
 	$(GO) vet ./...
 	bash -n install.sh
-	shellcheck install.sh scripts/*.sh
+	shellcheck install.sh scripts/*.sh internal/service/network-pre-down.sh
 build:
 	$(GO) build -o dist/steamos-tv-control ./cmd/steamos-tv-control
 release:

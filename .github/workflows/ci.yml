@@ -18,7 +18,7 @@ jobs:
       - run: go test -race ./...
       - run: go vet ./...
       - if: runner.os == 'Linux'
-        run: shellcheck install.sh scripts/*.sh
+        run: shellcheck install.sh scripts/*.sh internal/service/network-pre-down.sh
       - if: runner.os == 'Linux'
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck= .github/workflows/ci.yml .github/workflows/release.yml
       - run: make release VERSION=v0.0.0-test

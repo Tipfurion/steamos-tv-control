@@ -44,10 +44,41 @@ inhibitor bounds pre-sleep/stop work to at most two seconds within logind's
 budget. Without shutdown metadata, the daemon does not guess poweroff versus
 reboot. Network reconnects and service restarts do not trigger another wake.
 
+The daemon opens a persistent Remote v2 control session immediately at startup
+and answers its keepalive pings. Refresh and standby reuse the ready socket:
+NetworkManager begins disabling Wi-Fi concurrently with PrepareForSleep, so a
+new TLS handshake at that point can miss the remaining network window. EOF and
+idle expiry invalidate cached power. Resume discards the old socket before
+obtaining a fresh power report and applying the wake policy. Pairing continues
+to use the pinned upstream library; the control session owns framing, socket
+deadlines, liveness and serialized writes.
+
+On NetworkManager systems, service installation also uses sudo to install a
+root-owned pre-down hook at
+`/etc/NetworkManager/dispatcher.d/pre-down.d/90-steamos-tv-control-<uid>`.
+SteamOS keeps `/etc` in a writable overlay, so the system image stays read-only.
+NetworkManager waits for this hook before disconnecting the interface. The hook
+checks logind's sleep state and calls the daemon's bounded `/network/pre-down`
+endpoint, which respects AutoOff. It drops privileges before opening the user
+socket and never executes a home-directory binary as root. Ordinary network
+disconnects do not request standby. Uninstallation removes the hook with sudo;
+unchanged hooks do not request authorization again on updates.
+
+Abandoned control sockets use an abortive TCP close. An unconfirmed POWER must
+not remain queued for delivery when Wi-Fi reconnects after resume.
+
 Discrete power uses WAKEUP/SLEEP. TCL firmware tested here ignores SLEEP;
 guarded-power uses POWER only after a fresh state report and persists unresolved
 toggles to prevent blind repeats across process restarts. HDMI sequences are
 restricted to input/navigation keys. Changing one invalidates its verification.
+
+HDMI selection supports `direct` key commands, a navigation `sequence`, or an
+`app-link` with an `input_uri` pointing to an Android TV passthrough input.
+The link is bound to the configured HDMI port and is sent as a Remote v2 app
+link request. It does not require ADB or menu navigation. Onboarding tries a
+modern TCL input link if the direct key does not select the PC picture; the
+user must confirm the alternative before automatic input selection is enabled.
+The advanced TUI's `l` action edits the link for firmware with different IDs.
 
 ## Logs
 

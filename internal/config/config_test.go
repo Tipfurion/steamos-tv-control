@@ -40,3 +40,26 @@ func TestRejectUnsafeSequencesAndPaths(t *testing.T) {
 		}
 	}
 }
+
+func TestInputLinkConfiguration(t *testing.T) {
+	p := Paths{Config: t.TempDir()}
+	c := Default()
+	c.Host = "tv.local"
+	c.HDMI = 2
+	c.InputMode = "app-link"
+	c.InputURI = "content://android.media.tv/passthrough/com.tcl.tvinput%2F.TvPassThroughService%2FHW16"
+	c.InputVerified = true
+	if err := Save(p, c); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(p)
+	if err != nil || got.InputURI != c.InputURI || got.InputMode != c.InputMode || !got.InputVerified {
+		t.Fatal(got, err)
+	}
+	for _, value := range []string{"", "https://example.com/", "content://android.media.tv/passthrough/", "content://android.media.tv/channel/2"} {
+		c.InputURI = value
+		if err := Save(p, c); err == nil {
+			t.Fatal("accepted invalid input link", value)
+		}
+	}
+}

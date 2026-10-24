@@ -3,11 +3,16 @@
 ## Automated checks
 
 `make test` runs the race detector. Tests cover cancellation, repeated power
-commands, wake order, bounded standby, unverified HDMI, input sequences,
+commands, wake order, bounded standby, unverified HDMI, input links and sequences,
 persisted boot/toggle state, atomic configuration and file permissions.
 
 A real local TLS server exercises mutual TLS, varint protobuf framing,
-fragmentation, power reports and cancellation of a silent pairing server.
+fragmentation, power reports, exact input-link delivery, TCL startup key loss
+and cancellation of a silent pairing server. Closing the listener while leaving
+the control socket open verifies standby without reconnecting, including a
+30 ms reuse budget on TCL. Additional checks cover keepalive responses, power
+invalidation after peer EOF, reconnection with a different state and resetting
+the transport before the resume action.
 A UDP receiver checks the Wake-on-LAN payload.
 
 When dbus-daemon is available, tests create an isolated bus and a mock logind
@@ -15,7 +20,8 @@ service. Real signals and Unix FD passing verify inhibitor lifetime and
 reacquisition after resume, including an older interface without shutdown metadata.
 
 Onboarding tests cover automatic selection of a single TV, multiple devices,
-TCL profile selection, skipped and verified HDMI, and rejected pairing. They
+TCL profile selection, skipped and verified HDMI, input-link fallback with
+visual confirmation, and rejected pairing. They
 assert that no TUI or pairing code appears in the output. Logging tests check
 journald severity prefixes and omission of duplicate timestamps.
 

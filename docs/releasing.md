@@ -32,6 +32,7 @@ Tags such as v0.1.0-rc.1 are published as prereleases and do not become latest.
 The workflow creates a draft, attaches all assets, and only then publishes it.
 Release notes include an installation command pinned to that tag and links to
 the corresponding instructions. A failed build does not publish a release.
+Version-specific notes from `docs/releases/<tag>.md` are included when present.
 An upload failure may leave an unpublished draft for inspection.
 
 ## Installation behavior

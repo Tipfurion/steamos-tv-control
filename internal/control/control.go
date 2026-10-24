@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,6 +13,12 @@ import (
 	"github.com/Tipfurion/steamos-tv-control/internal/config"
 	"github.com/Tipfurion/steamos-tv-control/internal/tv"
 )
+
+var errPendingPower = errors.New("unconfirmed POWER transition")
+
+// Manual commands can wait for the TV's response without delaying PC sleep.
+// Lifecycle actions use the separate, shorter logind inhibitor budget.
+const ManualOffTimeout = 10 * time.Second
 
 type Status struct {
 	Host      string    `json:"host"`
@@ -38,6 +45,10 @@ func New(c config.Config, d tv.Device) *Controller {
 	return &Controller{TV: d, Config: c, Wake: tv.Wake, Retry: time.Second, gate: make(chan struct{}, 1), status: Status{Host: c.Host, Power: "unknown"}}
 }
 func (c *Controller) Status() Status { c.mu.RLock(); defer c.mu.RUnlock(); return c.status }
+
+// The interface and route can disappear during suspend without an immediate
+// socket error. Resume must obtain a fresh power report before using POWER.
+func (c *Controller) ResetConnection() { c.TV.Close() }
 
 // Refresh observes state without changing the last action or competing with it.
 func (c *Controller) Refresh(ctx context.Context) {
@@ -122,6 +133,9 @@ func (c *Controller) Execute(ctx context.Context, action string, hdmi int) (err 
 			return err
 		}
 		confirmed = c.waitPower(ctx, "standby") == nil
+		if !confirmed {
+			c.TV.Close()
+		}
 		if confirmed && c.Config.PowerMode == "guarded-power" {
 			err = c.clearPending()
 		}
@@ -147,6 +161,7 @@ func (c *Controller) Execute(ctx context.Context, action string, hdmi int) (err 
 func (c *Controller) on(ctx context.Context) error {
 	var last error
 	attempts := 0
+	powerAttempted := false
 	for ctx.Err() == nil {
 		attempts++
 		attempt, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -155,22 +170,29 @@ func (c *Controller) on(ctx context.Context) error {
 		if err == nil {
 			if c.Config.PowerMode == "guarded-power" {
 				if c.TV.Power() != "on" {
-					if err = c.toggle(ctx, "on"); err != nil {
-						return err
+					if !powerAttempted {
+						if err = c.toggle(ctx, "on"); err != nil && (!errors.Is(err, errPendingPower) || c.Config.MAC == "") {
+							return err
+						}
+						powerAttempted = true
 					}
-					if err = c.waitPower(ctx, "on"); err != nil {
+					wait, stop := context.WithTimeout(ctx, 4*time.Second)
+					err = c.waitPower(wait, "on")
+					stop()
+					if err != nil && c.Config.MAC == "" {
 						return fmt.Errorf("POWER was not confirmed; it will not be retried automatically: %w", err)
 					}
 				}
-				if err = c.clearPending(); err != nil {
-					return err
+				if err == nil {
+					if err = c.clearPending(); err != nil {
+						return err
+					}
+					if c.Config.InputVerified {
+						return c.input(ctx, c.Config.HDMI)
+					}
+					return nil
 				}
-				if c.Config.InputVerified {
-					return c.input(ctx, c.Config.HDMI)
-				}
-				return nil
-			}
-			if err = c.TV.Send(ctx, "WAKEUP"); err == nil {
+			} else if err = c.TV.Send(ctx, "WAKEUP"); err == nil {
 				wait, stop := context.WithTimeout(ctx, 4*time.Second)
 				err = c.waitPower(wait, "on")
 				stop()
@@ -227,8 +249,16 @@ func (c *Controller) toggle(ctx context.Context, target string) error {
 			return err
 		}
 	}
+	if c.pending == power {
+		// A later power report can confirm an earlier command after its
+		// original deadline. Release that completed transition before sending
+		// a command in the opposite direction.
+		if err := c.clearPending(); err != nil {
+			return err
+		}
+	}
 	if c.pending != "" {
-		return fmt.Errorf("previous POWER (%s) was not confirmed; repeat blocked", c.pending)
+		return fmt.Errorf("previous POWER (%s) was not confirmed; repeat blocked: %w", c.pending, errPendingPower)
 	}
 	if c.ToggleFile != "" {
 		b, _ := json.Marshal(struct{ Host, Target string }{c.Config.Host, target})
@@ -253,7 +283,13 @@ func (c *Controller) input(ctx context.Context, hdmi int) error {
 		return c.TV.Send(ctx, fmt.Sprintf("TV_INPUT_HDMI_%d", hdmi))
 	}
 	if hdmi != c.Config.HDMI {
-		return fmt.Errorf("the sequence is configured only for HDMI %d", c.Config.HDMI)
+		return fmt.Errorf("this input method is configured only for HDMI %d", c.Config.HDMI)
+	}
+	if c.Config.InputMode == "app-link" {
+		return c.TV.Launch(ctx, c.Config.InputURI)
+	}
+	if c.Config.InputMode != "sequence" {
+		return fmt.Errorf("unknown input mode %q", c.Config.InputMode)
 	}
 	for _, s := range c.Config.Sequence {
 		if err := c.TV.Send(ctx, s.Key); err != nil {

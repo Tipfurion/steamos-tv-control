@@ -98,7 +98,7 @@ func Run(ctx context.Context, args []string) error {
 		call, cancel := context.WithTimeout(ctx, time.Duration(c.WakeSeconds)*time.Second)
 		defer cancel()
 		if action == "off" {
-			call, cancel = context.WithTimeout(call, 2*time.Second)
+			call, cancel = context.WithTimeout(call, control.ManualOffTimeout)
 			defer cancel()
 		}
 		probe, stop := context.WithTimeout(ctx, 500*time.Millisecond)
@@ -281,6 +281,7 @@ func daemon(ctx context.Context, p config.Paths) error {
 		return nil
 	}
 	mux := http.NewServeMux()
+	mux.Handle("POST /network/pre-down", networkSleepHandler(c.AutoOff, c.HDMI, m.Budget, ctl.Execute))
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(ctl.Status())
@@ -295,7 +296,7 @@ func daemon(ctx context.Context, p config.Paths) error {
 		slog.Info("Manual TV action requested", "action", action, "hdmi", hdmi)
 		duration := time.Duration(c.WakeSeconds) * time.Second
 		if action == "off" {
-			duration = 2 * time.Second
+			duration = control.ManualOffTimeout
 		}
 		call, stop := context.WithTimeout(req.Context(), duration)
 		defer stop()
@@ -334,13 +335,13 @@ func daemon(ctx context.Context, p config.Paths) error {
 		timer := time.NewTicker(15 * time.Second)
 		defer timer.Stop()
 		for {
+			probe, stop := context.WithTimeout(ctx, 3*time.Second)
+			ctl.Refresh(probe)
+			stop()
 			select {
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-				probe, stop := context.WithTimeout(ctx, 3*time.Second)
-				ctl.Refresh(probe)
-				stop()
 			}
 		}
 	}()
@@ -365,6 +366,10 @@ func doctor(ctx context.Context, p config.Paths) error {
 	} else {
 		checks["host"] = c.Host
 		checks["input_verified"] = c.InputVerified
+		checks["input_mode"] = c.InputMode
+		if c.InputMode == "app-link" {
+			checks["input_uri"] = c.InputURI
+		}
 		checks["wake_on_lan"] = c.MAC != ""
 		for _, port := range []string{"6466", "6467"} {
 			dial := net.Dialer{Timeout: 2 * time.Second}
@@ -400,6 +405,7 @@ func doctor(ctx context.Context, p config.Paths) error {
 		checks["daemon"] = "not running"
 	}
 	if runtime.GOOS == "linux" {
+		checks["network_sleep_hook"] = service.NetworkSleepReady(p)
 		m, e := logind.Open("")
 		if e != nil {
 			checks["logind_error"] = e.Error()

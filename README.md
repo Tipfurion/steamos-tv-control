@@ -31,13 +31,14 @@ installation command on its [release page](https://github.com/Tipfurion/steamos-
 The command finds your TV and sets everything up. Enter the code shown on the
 TV, then select the HDMI port connected to your PC. If more than one TV is
 found, choose yours from the list. No setup wizard is opened.
+Confirm that your PC picture is visible when asked.
 
 If your PC is not connected to the TV yet, press Enter at the HDMI question.
 Automatic power control will still be configured. You can set up HDMI later.
 
-SteamOS may ask you to authorize automatic startup. When installation finishes,
-return to Gaming Mode and use your PC normally. You do not need to unlock or
-modify SteamOS system files.
+SteamOS may ask for your password to allow automatic startup and TV control
+before the PC sleeps. When installation finishes, return to Gaming Mode and
+use your PC normally. The SteamOS system image stays read-only.
 
 ## Advanced settings
 
