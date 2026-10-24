@@ -26,33 +26,42 @@ type Device interface {
 
 type Remote struct {
 	client   *atv.AndroidTVRemote
-	mu       sync.RWMutex
-	power    string
+	mu       sync.Mutex
 	reported string
 }
 
 func New(c config.Config, p config.Paths) *Remote { return NewAt(c.Host, p.Certs(c), 6466, 6467) }
 func NewAt(host, dir string, apiPort, pairPort int) *Remote {
-	r := &Remote{power: "unknown"}
+	r := &Remote{}
 	r.client = atv.New("SteamOS TV Control", filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem"), host, atv.WithAPIPort(apiPort), atv.WithPairPort(pairPort), atv.WithIME(false), atv.WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
 	r.client.AddIsOnUpdatedCallback(func(on bool) {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		previous := r.reported
+		power := "standby"
 		if on {
-			r.power = "on"
-		} else {
-			r.power = "standby"
+			power = "on"
 		}
-		if previous != r.power {
-			slog.Info("TV power state changed", "host", host, "previous", previous, "power", r.power)
-			r.reported = r.power
+		if previous != power {
+			slog.Info("TV power state changed", "host", host, "previous", previous, "power", power)
+			r.reported = power
 		}
 	})
 	return r
 }
-func (r *Remote) Power() string { r.mu.RLock(); defer r.mu.RUnlock(); return r.power }
-func (r *Remote) Close()        { r.client.Disconnect(); r.mu.Lock(); r.power = "unknown"; r.mu.Unlock() }
+func (r *Remote) Power() string {
+	// Upstream publishes the protocol state before Connect returns, but invokes
+	// its callback afterwards. Read that state directly; callbacks only log.
+	on, ok := r.client.IsOn()
+	if !ok {
+		return "unknown"
+	}
+	if on {
+		return "on"
+	}
+	return "standby"
+}
+func (r *Remote) Close() { r.client.Disconnect() }
 func (r *Remote) Connect(ctx context.Context) error {
 	start := time.Now()
 	slog.Debug("Connecting to TV")

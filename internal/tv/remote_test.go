@@ -94,6 +94,11 @@ func TestPairingCancellationClosesSilentServer(t *testing.T) {
 	}
 }
 func TestRemoteTLSFramingAndPower(t *testing.T) {
+	t.Run("normal callback", func(t *testing.T) { testRemoteTLSFramingAndPower(t, false) })
+	t.Run("delayed callback", func(t *testing.T) { testRemoteTLSFramingAndPower(t, true) })
+}
+
+func testRemoteTLSFramingAndPower(t *testing.T, delayCallback bool) {
 	cert, key, err := atv.GenerateSelfSignedCert("test TV")
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +193,27 @@ func TestRemoteTLSFramingAndPower(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	if err = r.Connect(ctx); err != nil {
+	if delayCallback {
+		// Block the adapter's callback while the upstream connection becomes
+		// ready. Power must still expose the initial protocol state immediately.
+		func() {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if err = r.client.Connect(ctx); err != nil {
+				t.Fatal(err)
+			}
+			power := make(chan string, 1)
+			go func() { power <- r.Power() }()
+			select {
+			case value := <-power:
+				if value != "on" {
+					t.Fatal(value)
+				}
+			case <-ctx.Done():
+				t.Fatal("power reporting waits for callback")
+			}
+		}()
+	} else if err = r.Connect(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if r.Power() != "on" {
