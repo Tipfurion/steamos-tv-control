@@ -1,0 +1,46 @@
+name: Release
+on:
+  push:
+    tags: ['v[0-9]*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update && sudo apt-get install -y dbus shellcheck
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: shellcheck install.sh scripts/*.sh
+      - run: bash scripts/test-docker.sh
+      - run: make release VERSION="$GITHUB_REF_NAME"
+      - run: python3 scripts/test-release-package.py
+      - name: Create complete draft, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" \
+            dist/install.sh dist/steamos-tv-control_linux_amd64.tar.gz dist/SHA256SUMS \
+            --draft --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes-file dist/release-notes.md --generate-notes "${flags[@]}"
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            gh release edit "$GITHUB_REF_NAME" --draft=false --latest=false
+          else
+            gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          fi
+          if [[ "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" --jq .immutable)" != true ]]; then
+            echo '::warning::Enable release immutability in repository Settings > General > Releases before publishing the next version.'
+          fi
