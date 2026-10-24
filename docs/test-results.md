@@ -152,6 +152,20 @@ The installed build is `dev-sleep-order-fix`. Two real suspend/resume cycles
 passed with the NetworkManager hook. Longer repeated runs and long-duration
 standby remain separate acceptance checks.
 
+## Release CI timing checks
+
+The v0.1.2 workflow exposed a test-only timing assumption: filesystem sync took
+98 ms while an unconfirmed-toggle test started a 20 ms deadline before writing
+its state. Linux repetition reproduced the same failure in another persistence
+scenario. Controller timeout and retry tests now run with testing/synctest's
+virtual clock. One hundred repetitions passed with the race detector on macOS
+and on a Linux container limited to two CPUs. TV control behavior is unchanged
+by this test correction.
+The installer prompt test had the same PTY-close/child-exit race previously
+fixed in the TUI harness. Both now wait within the original deadline and
+check the final exit status. Twenty repeated first-install prompt checks and
+the full read-only Docker suite passed after the fix.
+
 ## Pending on target hardware
 
 - Input selection from other external sources and repeated sleep/wake cycles.

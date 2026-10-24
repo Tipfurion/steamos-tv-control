@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Tipfurion/steamos-tv-control/internal/config"
@@ -85,25 +86,27 @@ func TestGuardedPowerIsIdempotent(t *testing.T) {
 	}
 }
 func TestGuardedPowerDoesNotRepeatUnconfirmedToggleAfterRestart(t *testing.T) {
-	c := fixture()
-	c.PowerMode = "guarded-power"
-	f := &fakeTV{power: "on", blocked: true}
-	file := filepath.Join(t.TempDir(), "pending.json")
-	ctl := New(c, f)
-	ctl.ToggleFile = file
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if err := ctl.Execute(ctx, "off", 1); err != nil {
-		t.Fatal(err)
-	}
-	restarted := New(c, f)
-	restarted.ToggleFile = file
-	if err := restarted.Execute(context.Background(), "off", 1); err == nil {
-		t.Fatal("repeated ambiguous toggle")
-	}
-	if !reflect.DeepEqual(f.keys, []string{"POWER"}) {
-		t.Fatal(f.keys)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c := fixture()
+		c.PowerMode = "guarded-power"
+		f := &fakeTV{power: "on", blocked: true}
+		file := filepath.Join(t.TempDir(), "pending.json")
+		ctl := New(c, f)
+		ctl.ToggleFile = file
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		if err := ctl.Execute(ctx, "off", 1); err != nil {
+			t.Fatal(err)
+		}
+		restarted := New(c, f)
+		restarted.ToggleFile = file
+		if err := restarted.Execute(context.Background(), "off", 1); err == nil {
+			t.Fatal("repeated ambiguous toggle")
+		}
+		if !reflect.DeepEqual(f.keys, []string{"POWER"}) {
+			t.Fatal(f.keys)
+		}
+	})
 }
 func TestGuardedPowerRefusesUnknownState(t *testing.T) {
 	c := fixture()
@@ -119,93 +122,99 @@ func TestGuardedPowerRefusesUnknownState(t *testing.T) {
 }
 
 func TestGuardedPowerAcceptsDelayedConfirmationAfterRestart(t *testing.T) {
-	c := fixture()
-	c.PowerMode = "guarded-power"
-	c.InputVerified = false
-	f := &fakeTV{power: "on", blocked: true}
-	file := filepath.Join(t.TempDir(), "pending.json")
-	ctl := New(c, f)
-	ctl.ToggleFile = file
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if err := ctl.Execute(ctx, "off", 1); err != nil {
-		t.Fatal(err)
-	}
-	// Standby arrives after the sleep budget expired. A fresh connection on
-	// the next invocation confirms the previous toggle before waking the TV.
-	f.mu.Lock()
-	f.power = "standby"
-	f.blocked = false
-	f.mu.Unlock()
-	restarted := New(c, f)
-	restarted.ToggleFile = file
-	if err := restarted.Execute(context.Background(), "on", 1); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(f.keys, []string{"POWER", "POWER"}) || !restarted.Status().Confirmed {
-		t.Fatal(f.keys, restarted.Status())
-	}
+	synctest.Test(t, func(t *testing.T) {
+		c := fixture()
+		c.PowerMode = "guarded-power"
+		c.InputVerified = false
+		f := &fakeTV{power: "on", blocked: true}
+		file := filepath.Join(t.TempDir(), "pending.json")
+		ctl := New(c, f)
+		ctl.ToggleFile = file
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		if err := ctl.Execute(ctx, "off", 1); err != nil {
+			t.Fatal(err)
+		}
+		// Standby arrives after the sleep budget expired. A fresh connection on
+		// the next invocation confirms the previous toggle before waking the TV.
+		f.mu.Lock()
+		f.power = "standby"
+		f.blocked = false
+		f.mu.Unlock()
+		restarted := New(c, f)
+		restarted.ToggleFile = file
+		if err := restarted.Execute(context.Background(), "on", 1); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(f.keys, []string{"POWER", "POWER"}) || !restarted.Status().Confirmed {
+			t.Fatal(f.keys, restarted.Status())
+		}
+	})
 }
 
 func TestWakeOrdersCommandsAndRetries(t *testing.T) {
-	f := &fakeTV{power: "standby", fail: 1}
-	c := fixture()
-	c.MAC = "00:11:22:33:44:55"
-	ctl := New(c, f)
-	ctl.Retry = time.Millisecond
-	wakes := 0
-	ctl.Wake = func(context.Context, string, string) error { wakes++; return nil }
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := ctl.Execute(ctx, "on", 1); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(f.keys, []string{"WAKEUP", "TV_INPUT_HDMI_1"}) || wakes != 1 {
-		t.Fatal(f.keys, wakes)
-	}
-	if !ctl.Status().Confirmed {
-		t.Fatal(ctl.Status())
-	}
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeTV{power: "standby", fail: 1}
+		c := fixture()
+		c.MAC = "00:11:22:33:44:55"
+		ctl := New(c, f)
+		ctl.Retry = time.Millisecond
+		wakes := 0
+		ctl.Wake = func(context.Context, string, string) error { wakes++; return nil }
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := ctl.Execute(ctx, "on", 1); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(f.keys, []string{"WAKEUP", "TV_INPUT_HDMI_1"}) || wakes != 1 {
+			t.Fatal(f.keys, wakes)
+		}
+		if !ctl.Status().Confirmed {
+			t.Fatal(ctl.Status())
+		}
+	})
 }
 
 func TestGuardedWakeFallsBackWithoutRepeatingPower(t *testing.T) {
 	for _, previousAttempt := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ignored POWER", true: "unconfirmed previous invocation"}[previousAttempt], func(t *testing.T) {
-			c := fixture()
-			c.PowerMode = "guarded-power"
-			c.InputVerified = false
-			f := &fakeTV{power: "standby", blocked: true}
-			file := filepath.Join(t.TempDir(), "pending.json")
-			if previousAttempt {
+			synctest.Test(t, func(t *testing.T) {
+				c := fixture()
+				c.PowerMode = "guarded-power"
+				c.InputVerified = false
+				f := &fakeTV{power: "standby", blocked: true}
+				file := filepath.Join(t.TempDir(), "pending.json")
+				if previousAttempt {
+					ctl := New(c, f)
+					ctl.ToggleFile = file
+					ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+					err := ctl.Execute(ctx, "on", 1)
+					cancel()
+					if !errors.Is(err, context.DeadlineExceeded) {
+						t.Fatal(err)
+					}
+				}
+				c.MAC = "00:11:22:33:44:55"
 				ctl := New(c, f)
 				ctl.ToggleFile = file
-				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-				err := ctl.Execute(ctx, "on", 1)
-				cancel()
-				if !errors.Is(err, context.DeadlineExceeded) {
+				ctl.Retry = time.Millisecond
+				wakes := 0
+				ctl.Wake = func(context.Context, string, string) error {
+					wakes++
+					f.mu.Lock()
+					f.power = "on"
+					f.mu.Unlock()
+					return nil
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+				defer cancel()
+				if err := ctl.Execute(ctx, "on", 1); err != nil {
 					t.Fatal(err)
 				}
-			}
-			c.MAC = "00:11:22:33:44:55"
-			ctl := New(c, f)
-			ctl.ToggleFile = file
-			ctl.Retry = time.Millisecond
-			wakes := 0
-			ctl.Wake = func(context.Context, string, string) error {
-				wakes++
-				f.mu.Lock()
-				f.power = "on"
-				f.mu.Unlock()
-				return nil
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
-			defer cancel()
-			if err := ctl.Execute(ctx, "on", 1); err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(f.keys, []string{"POWER"}) || wakes != 1 || !ctl.Status().Confirmed {
-				t.Fatal(f.keys, wakes, ctl.Status())
-			}
+				if !reflect.DeepEqual(f.keys, []string{"POWER"}) || wakes != 1 || !ctl.Status().Confirmed {
+					t.Fatal(f.keys, wakes, ctl.Status())
+				}
+			})
 		})
 	}
 }
@@ -230,16 +239,18 @@ func TestSleepIsIdempotentAndNeverWakes(t *testing.T) {
 	}
 }
 func TestCancelBeforePowerReportDoesNotSelectHDMI(t *testing.T) {
-	f := &fakeTV{power: "standby", blocked: true}
-	ctl := New(fixture(), f)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if err := ctl.Execute(ctx, "on", 1); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(f.keys, []string{"WAKEUP"}) {
-		t.Fatal(f.keys)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeTV{power: "standby", blocked: true}
+		ctl := New(fixture(), f)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		if err := ctl.Execute(ctx, "on", 1); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(f.keys, []string{"WAKEUP"}) {
+			t.Fatal(f.keys)
+		}
+	})
 }
 func TestUnverifiedInputIsNotAutomated(t *testing.T) {
 	c := fixture()
@@ -313,18 +324,20 @@ func TestInputLinkIsUsedForManualSelectionAndWake(t *testing.T) {
 }
 
 func TestUnconfirmedSleepReturnsWithinBudget(t *testing.T) {
-	f := &fakeTV{power: "on", blocked: true}
-	ctl := New(fixture(), f)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if err := ctl.Execute(ctx, "off", 1); err != nil {
-		t.Fatal(err)
-	}
-	s := ctl.Status()
-	if s.Confirmed || s.Result != "command_sent" {
-		t.Fatal(s)
-	}
-	if f.closes == 0 {
-		t.Fatal("unconfirmed standby left an old connection open")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeTV{power: "on", blocked: true}
+		ctl := New(fixture(), f)
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+		if err := ctl.Execute(ctx, "off", 1); err != nil {
+			t.Fatal(err)
+		}
+		s := ctl.Status()
+		if s.Confirmed || s.Result != "command_sent" {
+			t.Fatal(s)
+		}
+		if f.closes == 0 {
+			t.Fatal("unconfirmed standby left an old connection open")
+		}
+	})
 }

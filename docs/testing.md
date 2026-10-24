@@ -5,6 +5,8 @@
 `make test` runs the race detector. Tests cover cancellation, repeated power
 commands, wake order, bounded standby, unverified HDMI, input links and sequences,
 persisted boot/toggle state, atomic configuration and file permissions.
+Controller deadline and retry scenarios use Go's virtual test clock so slow
+filesystem synchronization cannot expire a confirmation timer before key send.
 
 A real local TLS server exercises mutual TLS, varint protobuf framing,
 fragmentation, power reports, exact input-link delivery, TCL startup key loss
